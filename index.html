@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Red Cheeks — Family Car Calendar</title>
+  <meta name="description" content="Red Cheeks: A shared family car booking calendar for siblings." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <!-- Supabase JS Client -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <!-- ───── Floating Blobs ───── -->
+  <div class="blob blob-1"></div>
+  <div class="blob blob-2"></div>
+  <div class="blob blob-3"></div>
+
+  <!-- ───── Auth Screen (Signup / Login) ───── -->
+  <div id="auth-screen" class="auth-overlay">
+    <div class="auth-card">
+      <div class="logo-icon mb-2">
+        <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <rect width="64" height="64" rx="16" fill="url(#logo-grad-auth)"/>
+          <path d="M16 38c0-8 6-18 16-18s16 10 16 18" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+          <circle cx="24" cy="40" r="4" fill="#fff" opacity=".85"/>
+          <circle cx="40" cy="40" r="4" fill="#fff" opacity=".85"/>
+          <path d="M14 36h36" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>
+          <defs>
+            <linearGradient id="logo-grad-auth" x1="0" y1="0" x2="64" y2="64">
+              <stop stop-color="#ff6b6b"/>
+              <stop offset="1" stop-color="#ee5a24"/>
+            </linearGradient>
+          </defs>
+        </svg>
+      </div>
+      <h2 id="auth-title">Red Cheeks</h2>
+      
+      <!-- Signup Form -->
+      <div id="signup-form" class="auth-form">
+        <p class="auth-hint">Create your family account</p>
+        <div class="field-group">
+          <input type="email" id="signup-email" placeholder="Email Address" required />
+          <input type="text" id="signup-username" placeholder="Username" required />
+          <input type="password" id="signup-password" placeholder="Password" required />
+          <input type="tel" id="signup-phone" placeholder="Your Phone Number" />
+          <hr class="form-divider"/>
+          <p class="sub-label">Invite your partner (Driver 2)</p>
+          <input type="text" id="signup-partner" placeholder="Partner's Name" />
+          <input type="tel" id="signup-partner-phone" placeholder="Partner's Phone Number" />
+        </div>
+        <button id="btn-signup-submit" class="auth-btn">Create Account</button>
+        <p class="toggle-text">Already have an account? <a href="#" id="link-to-login">Login</a></p>
+      </div>
+
+      <!-- Login Form -->
+      <div id="login-form" class="auth-form hidden">
+        <p class="auth-hint">Welcome back!</p>
+        <div class="field-group">
+          <input type="email" id="login-email" placeholder="Email Address" required />
+          <input type="password" id="login-password" placeholder="Password" required />
+        </div>
+        <button id="btn-login-submit" class="auth-btn">Login</button>
+        <div class="auth-footer-links">
+          <a href="#" id="link-forgot-password" class="forgot-link">Forgot password?</a>
+          <p class="toggle-text">Need an account? <a href="#" id="link-to-signup">Sign Up</a></p>
+        </div>
+      </div>
+
+      <!-- Reset Password Form (Hidden) -->
+      <div id="reset-form" class="auth-form hidden">
+        <p class="auth-hint">Reset your password</p>
+        <div class="field-group">
+          <input type="email" id="reset-email" placeholder="Enter your email" required />
+        </div>
+        <button id="btn-reset-submit" class="auth-btn">Send Reset Link</button>
+        <p class="toggle-text"><a href="#" id="link-back-to-login">Back to Login</a></p>
+      </div>
+
+      <p id="auth-error" class="error-msg hidden"></p>
+    </div>
+  </div>
+
+  <div id="app" class="hidden">
+    <header id="app-header">
+      <div class="header-main">
+        <div class="logo-group">
+          <div class="logo-icon" aria-hidden="true">
+            <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect width="64" height="64" rx="16" fill="url(#logo-grad)"/>
+              <path d="M16 38c0-8 6-18 16-18s16 10 16 18" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+              <circle cx="24" cy="40" r="4" fill="#fff" opacity=".85"/>
+              <circle cx="40" cy="40" r="4" fill="#fff" opacity=".85"/>
+              <path d="M14 36h36" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>
+              <defs>
+                <linearGradient id="logo-grad" x1="0" y1="0" x2="64" y2="64">
+                  <stop stop-color="#ff6b6b"/>
+                  <stop offset="1" stop-color="#ee5a24"/>
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
+          <h1>Red Cheeks</h1>
+        </div>
+        <button id="btn-header-logout" class="header-logout-btn" title="Sign Out">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        </button>
+      </div>
+      <p class="subtitle">Family car calendar</p>
+    </header>
+
+    <!-- ───── User Switcher ───── -->
+    <section id="user-switcher" aria-label="Select driver">
+      <span class="switcher-label">Driving as:</span>
+      <div class="switcher-buttons">
+        <button id="btn-user-a" class="switcher-btn active" data-user="A">
+          <span class="avatar avatar-a">M</span>
+          <span class="name" id="name-a">Driver 1</span>
+        </button>
+        <button id="btn-user-b" class="switcher-btn" data-user="B">
+          <span class="avatar avatar-b">B</span>
+          <span class="name" id="name-b">Driver 2</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- ───── Month Navigation ───── -->
+    <nav id="month-nav" aria-label="Month navigation">
+      <button id="btn-prev" class="nav-btn" aria-label="Previous month">
+        <svg width="20" height="20" viewBox="0 0 20 20"><path d="M13 4l-6 6 6 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <h2 id="month-title"></h2>
+      <button id="btn-next" class="nav-btn" aria-label="Next month">
+        <svg width="20" height="20" viewBox="0 0 20 20"><path d="M7 4l6 6-6 6" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button id="btn-today" class="today-btn">Today</button>
+    </nav>
+
+    <!-- ───── Calendar ───── -->
+    <div id="calendar-wrapper">
+      <div id="calendar-weekdays"></div>
+      <div id="calendar-grid"></div>
+    </div>
+
+    <!-- ───── Legend ───── -->
+    <section id="legend" aria-label="Legend">
+      <div class="legend-item"><span class="dot dot-a"></span><span id="legend-a">Driver 1</span></div>
+      <div class="legend-item"><span class="dot dot-b"></span><span id="legend-b">Driver 2</span></div>
+      <div class="legend-item"><span class="dot dot-free"></span>Available</div>
+    </section>
+
+    <!-- ───── Stats Panel ───── -->
+    <section id="stats-panel" aria-label="Statistics">
+      <div class="stats-header">
+        <span class="stats-title">📊 Monthly Stats</span>
+        <button id="btn-stats-toggle" class="stats-toggle-btn" aria-expanded="true">Hide</button>
+      </div>
+      <div id="stats-body">
+        <div id="stats-rows"><!-- filled by JS --></div>
+      </div>
+    </section>
+
+    <!-- ───── Settings Panel ───── -->
+    <details id="settings-panel">
+      <summary>⚙️ Settings</summary>
+      <div class="settings-body">
+        <div class="field">
+          <label for="input-name-a">Your name</label>
+          <input type="text" id="input-name-a" maxlength="16" placeholder="e.g. Matan" />
+        </div>
+        <div class="field">
+          <label for="input-name-b">Brother's name</label>
+          <input type="text" id="input-name-b" maxlength="16" placeholder="e.g. Dan" />
+        </div>
+        <button id="btn-save-names" class="save-btn">Save Names</button>
+        <hr/>
+        <button id="btn-clear-all" class="danger-btn">Clear All Bookings</button>
+        <hr/>
+        <button id="btn-logout" class="danger-btn">Logout</button>
+      </div>
+    </details>
+  </div>
+
+  <!-- ───── Toast ───── -->
+  <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
