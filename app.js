@@ -532,8 +532,12 @@
   $linkForgot.addEventListener("click", (e) => { e.preventDefault(); toggleAuthForm("reset"); });
   $linkBackLogin.addEventListener("click", (e) => { e.preventDefault(); toggleAuthForm("login"); });
   
+  // ── Logout Handler ───────────────────────
   const logoutHandler = () => {
-    localStorage.setItem(SESSION_KEY, "false");
+    // Clear session and account info to ensure proper logout
+    localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(ACCOUNT_KEY);
+    // Optionally, you could also clear other auth related storage
     location.reload();
   };
 
