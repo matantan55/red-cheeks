@@ -34,7 +34,6 @@ module.exports = async (req, res) => {
       phone,
       partner_name: partner,
       partner_phone: partnerPhone,
-      bookings: {}, // Initialize empty bookings
       createdAt: new Date(),
     };
 
