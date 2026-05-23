@@ -1,8 +1,20 @@
+const clientPromise = require('../lib/mongodb');
+const bcrypt = require('bcryptjs');
+
+
 module.exports = async (req, res) => {
+  // Debug: verify env var is present
+  console.log('Signup API - MONGODB_URI:', process.env.MONGODB_URI);
   // Enable CORS for all origins (adjust for production as needed)
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  // Verify MongoDB connection string is set
+  if (!process.env.MONGODB_URI) {
+    console.error('MongoDB URI not configured');
+    return res.status(500).json({ message: 'Server configuration error: MongoDB URI missing' });
+  }
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
