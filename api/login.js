@@ -18,7 +18,7 @@ module.exports = async (req, res) => {
     const { email, password } = req.body;
 
     const client = await clientPromise;
-    const db = client.db('redcheeks');
+    const db = client.db('users');
     const users = db.collection('users');
 
     const user = await users.findOne({ email });

@@ -3,8 +3,7 @@ const bcrypt = require('bcryptjs');
 
 
 module.exports = async (req, res) => {
-  // Debug: verify env var is present
-  console.log('Signup API - MONGODB_URI:', process.env.MONGODB_URI);
+
   // Enable CORS for all origins (adjust for production as needed)
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -32,7 +31,7 @@ module.exports = async (req, res) => {
     }
 
     const client = await clientPromise;
-    const db = client.db('redcheeks');
+    const db = client.db('users');
     const users = db.collection('users');
 
     // Check if user exists

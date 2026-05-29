@@ -13,7 +13,7 @@ module.exports = async (req, res) => {
 
   try {
     const client = await clientPromise;
-    const db = client.db('redcheeks');
+    const db = client.db('users');
     const users = db.collection('users');
 
     await users.updateOne(
