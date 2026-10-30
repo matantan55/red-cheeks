@@ -1,261 +1,87 @@
 /* ═══════════════════════════════════════════
-   Red Cheeks — App Logic
+   Red Cheeks — Open Shared Car Calendar
    ═══════════════════════════════════════════ */
 
 (() => {
   "use strict";
 
-  // ── State ────────────────────────────────
-  const ACCOUNT_KEY    = "redcheeks_account"; 
-  const SESSION_KEY    = "redcheeks_session";
+  // ── Storage Keys ─────────────────────────
+  const STORAGE_NAME_KEY = "redcheeks_driver_name";
 
-  let currentUser = "A";                // "A" or "B"
-  let viewDate    = new Date();          // tracks displayed month
-  let bookings    = {};                  // { "YYYY-MM-DD": "A"|"B" }
-  let account     = loadAccount();       // { email, username, etc }
-  let names       = { A: "Driver 1", B: "Driver 2" };
+  // ── State ────────────────────────────────
+  let currentName = localStorage.getItem(STORAGE_NAME_KEY) || "";
+  let viewDate    = new Date();
+  let bookings    = {}; // { "YYYY-MM-DD": "Name" }
+  let activeModalDate = null;
+  let syncTimer   = null;
 
   const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const MONTHS   = [
-    "January","February","March","April","May","June",
-    "July","August","September","October","November","December"
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
   ];
 
-  // ── DOM refs ─────────────────────────────
-  const $grid       = document.getElementById("calendar-grid");
-  const $weekdays   = document.getElementById("calendar-weekdays");
-  const $title      = document.getElementById("month-title");
-  const $btnPrev    = document.getElementById("btn-prev");
-  const $btnNext    = document.getElementById("btn-next");
-  const $btnToday   = document.getElementById("btn-today");
-  const $btnA       = document.getElementById("btn-user-a");
-  const $btnB       = document.getElementById("btn-user-b");
-  const $nameA      = document.getElementById("name-a");
-  const $nameB      = document.getElementById("name-b");
-  const $legendA    = document.getElementById("legend-a");
-  const $legendB    = document.getElementById("legend-b");
-  const $inputA     = document.getElementById("input-name-a");
-  const $inputB     = document.getElementById("input-name-b");
-  const $btnSave    = document.getElementById("btn-save-names");
-  const $btnClear   = document.getElementById("btn-clear-all");
-  const $toast      = document.getElementById("toast");
-  const $statsRows  = document.getElementById("stats-rows");
-  const $statsBody  = document.getElementById("stats-body");
-  const $btnStatsToggle = document.getElementById("btn-stats-toggle");
+  // ── Color Palettes for Drivers ────────────
+  const PALETTES = [
+    { key: "coral",   accent: "#ff6b6b", bg: "rgba(255, 107, 107, 0.22)", border: "#ff6b6b", text: "#ff8787" },
+    { key: "blue",    accent: "#4dabf7", bg: "rgba(77, 171, 247, 0.22)",  border: "#4dabf7", text: "#74c0fc" },
+    { key: "emerald", accent: "#38d9a9", bg: "rgba(56, 217, 169, 0.22)",  border: "#38d9a9", text: "#63e6be" },
+    { key: "amber",   accent: "#ffd43b", bg: "rgba(255, 212, 59, 0.22)",  border: "#ffd43b", text: "#ffe066" },
+    { key: "purple",  accent: "#da77f2", bg: "rgba(218, 119, 242, 0.22)", border: "#da77f2", text: "#e599f7" },
+    { key: "cyan",    accent: "#22b8cf", bg: "rgba(34, 184, 207, 0.22)",  border: "#22b8cf", text: "#66d9e8" },
+    { key: "orange",  accent: "#ff922b", bg: "rgba(255, 146, 43, 0.22)",  border: "#ff922b", text: "#ffa94d" },
+    { key: "indigo",  accent: "#748ffc", bg: "rgba(116, 143, 252, 0.22)", border: "#748ffc", text: "#91a7ff" },
+    { key: "lime",    accent: "#94d82d", bg: "rgba(148, 216, 45, 0.22)",  border: "#94d82d", text: "#a9e34b" },
+    { key: "pink",    accent: "#f783ac", bg: "rgba(247, 131, 172, 0.22)", border: "#f783ac", text: "#faa2c1" }
+  ];
 
-  // Auth DOM (Updated)
-  const $authScreen     = document.getElementById("auth-screen");
-  const $signupForm     = document.getElementById("signup-form");
-  const $loginForm      = document.getElementById("login-form");
-  const $resetForm      = document.getElementById("reset-form");
-  const $appContent      = document.getElementById("app");
-  const $authError      = document.getElementById("auth-error");
-  
-  const $signupEmail    = document.getElementById("signup-email");
-  const $signupUser     = document.getElementById("signup-username");
-  const $signupPass     = document.getElementById("signup-password");
-  const $signupPhone    = document.getElementById("signup-phone");
-  const $signupPartner  = document.getElementById("signup-partner");
-  const $signupPartnerPhone = document.getElementById("signup-partner-phone");
-  const $btnSignup      = document.getElementById("btn-signup-submit");
-  
-  const $loginEmail     = document.getElementById("login-email");
-  const $loginPass      = document.getElementById("login-password");
-  const $btnLogin       = document.getElementById("btn-login-submit");
-  
-  const $resetEmail     = document.getElementById("reset-email");
-  const $btnReset       = document.getElementById("btn-reset-submit");
-  
-  const $linkToLogin    = document.getElementById("link-to-login");
-  const $linkToSignup   = document.getElementById("link-to-signup");
-  const $linkForgot     = document.getElementById("link-forgot-password");
-  const $linkBackLogin  = document.getElementById("link-back-to-login");
-  const $btnLogout      = document.getElementById("btn-logout");
-  const $btnHeaderLogout = document.getElementById("btn-header-logout");
-
-  // ── Persistence helpers (MONGODB) ──────────
-  async function syncBookingsFromServer() {
-    if (!account?.email) return;
-    try {
-      const res = await fetch(`/api/bookings?email=${encodeURIComponent(account.email)}`);
-      const data = await res.json();
-      if (data.bookings) {
-        bookings = data.bookings;
-        renderCalendar();
-      }
-    } catch (e) { console.error("Sync failed", e); }
-  }
-
-  async function saveBookings() {
-    if (!account?.email) return;
-    try {
-      await fetch('/api/bookings?email=' + encodeURIComponent(account.email), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bookings })
-      });
-    } catch (e) { console.error("Save failed", e); }
-  }
-
-  function loadAccount() {
-    try { return JSON.parse(localStorage.getItem(ACCOUNT_KEY)) || null; }
-    catch { return null; }
-  }
-  function saveAccount(acc) {
-    localStorage.setItem(ACCOUNT_KEY, JSON.stringify(acc));
-  }
-
-  // ── Notification Helpers ─────────────────
-  function requestNotificationPermission() {
-    if ("Notification" in window) {
-      Notification.requestPermission();
+  function getDriverPalette(name) {
+    if (!name || !name.trim()) return PALETTES[0];
+    const clean = name.trim().toLowerCase();
+    let hash = 0;
+    for (let i = 0; i < clean.length; i++) {
+      hash = clean.charCodeAt(i) + ((hash << 5) - hash);
     }
+    const idx = Math.abs(hash) % PALETTES.length;
+    return PALETTES[idx];
   }
 
-  function sendPartnerNotification(title, body) {
-    if ("Notification" in window && Notification.permission === "granted") {
-      new Notification(title, {
-        body: body,
-        icon: "https://red-cheeks.vercel.app/favicon.ico"
-      });
-    }
-  }
+  // ── DOM References ───────────────────────
+  const $nameInput       = document.getElementById("driver-name-input");
+  const $currentAvatar   = document.getElementById("current-avatar");
+  const $quickDrivers    = document.getElementById("quick-drivers-list");
+  const $quickContainer  = document.getElementById("quick-drivers-container");
+  const $syncStatus      = document.getElementById("sync-status");
+  const $btnRefresh      = document.getElementById("btn-refresh");
 
-  // ── Toast ────────────────────────────────
-  let toastTimer = null;
-  function showToast(msg) {
-    if (!$toast) return;
-    $toast.textContent = msg;
-    $toast.classList.remove("hidden");
-    $toast.classList.add("show");
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => {
-      $toast.classList.remove("show");
-    }, 2200);
-  }
+  const $title           = document.getElementById("month-title");
+  const $btnPrev         = document.getElementById("btn-prev");
+  const $btnNext         = document.getElementById("btn-next");
+  const $btnToday        = document.getElementById("btn-today");
+  const $weekdays        = document.getElementById("calendar-weekdays");
+  const $grid            = document.getElementById("calendar-grid");
 
-  function showApp() {
-    $authScreen.classList.add("hidden");
-    $appContent.classList.remove("hidden");
-    if (account) {
-      names.A = account.username || "Driver 1";
-      names.B = account.partner_name || "Driver 2";
-    }
-    syncNames();
-    renderCalendar();
-  }
+  const $legend          = document.getElementById("legend");
+  const $statsRows       = document.getElementById("stats-rows");
+  const $statsBody       = document.getElementById("stats-body");
+  const $btnStatsToggle  = document.getElementById("btn-stats-toggle");
 
-  // ── Auth Logic (MONGODB API) ───────────────
-  async function checkAuth() {
-    const sessionEmail = localStorage.getItem(SESSION_KEY);
-    if (sessionEmail && account) {
-      showApp();
-      await syncBookingsFromServer();
-    } else if (account) {
-      toggleAuthForm("login");
-    }
-    requestNotificationPermission();
-  }
+  const $btnClearMy      = document.getElementById("btn-clear-my");
+  const $btnClearAll     = document.getElementById("btn-clear-all");
+  const $toast           = document.getElementById("toast");
 
-  function toggleAuthForm(mode) {
-    $signupForm.classList.add("hidden");
-    $loginForm.classList.add("hidden");
-    $resetForm.classList.add("hidden");
-    $authError.classList.add("hidden");
+  // Modal DOM
+  const $dayModal        = document.getElementById("day-modal");
+  const $modalTitle      = document.getElementById("modal-date-title");
+  const $modalBadge      = document.getElementById("modal-status-badge");
+  const $modalDesc       = document.getElementById("modal-desc");
+  const $modalClaimBtn   = document.getElementById("btn-modal-claim");
+  const $modalMyName     = document.getElementById("modal-my-name");
+  const $modalClearBtn   = document.getElementById("btn-modal-clear-day");
+  const $modalCloseBtn   = document.getElementById("btn-modal-close");
+  const $modalDismissBtn = document.getElementById("btn-modal-dismiss");
 
-    if (mode === "login") $loginForm.classList.remove("hidden");
-    else if (mode === "signup") $signupForm.classList.remove("hidden");
-    else if (mode === "reset") $resetForm.classList.remove("hidden");
-  }
-
-  async function handleSignUp() {
-    const email = $signupEmail.value.trim();
-    const username = $signupUser.value.trim();
-    const password = $signupPass.value.trim();
-    const phone = $signupPhone.value.trim();
-    const partner = $signupPartner.value.trim();
-    const partnerPhone = $signupPartnerPhone.value.trim();
-
-    if (!email || !username || !password) {
-      showAuthError("Please fill in email, username, and password.");
-      return;
-    }
-
-    try {
-      const res = await fetch('/api/signup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, username, password, phone, partner, partnerPhone })
-      });
-      const data = await res.json();
-      
-      if (!res.ok) {
-        showAuthError(data.message || "Signup failed");
-        return;
-      }
-
-      showToast("✅ Account created! Please log in.");
-      toggleAuthForm("login");
-    } catch (e) {
-      showAuthError("Connection error.");
-    }
-  }
-
-  async function handleLogin() {
-    const email = $loginEmail.value.trim();
-    const password = $loginPass.value.trim();
-
-    try {
-      const res = await fetch('/api/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password })
-      });
-      const data = await res.json();
-
-      if (!res.ok) {
-        showAuthError(data.message || "Login failed");
-        return;
-      }
-
-      account = data.user;
-      saveAccount(account);
-      localStorage.setItem(SESSION_KEY, email);
-      showApp();
-      await syncBookingsFromServer();
-    } catch (e) {
-      showAuthError("Connection error.");
-    }
-  }
-
-  async function handleResetPassword() {
-    const email = $resetEmail.value.trim();
-    if (!email) {
-      showAuthError("Enter your email address.");
-      return;
-    }
-
-    try {
-      const res = await fetch('/api/forgot-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email })
-      });
-      const data = await res.json();
-      
-      showToast(data.message || "📬 Check your email!");
-      toggleAuthForm("login");
-    } catch (e) {
-      showAuthError("Connection error.");
-    }
-  }
-
-  function showAuthError(msg) {
-    $authError.textContent = msg;
-    $authError.classList.remove("hidden");
-  }
-
-  // ── Helpers ──────────────────────────────
+  // ── Helper Formatting ────────────────────
   function dateKey(y, m, d) {
     return `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
   }
@@ -270,6 +96,148 @@
     t.setHours(0, 0, 0, 0);
     const cell = new Date(y, m, d);
     return cell < t;
+  }
+
+  function formatDateNice(key) {
+    const [y, m, d] = key.split("-").map(Number);
+    return `${MONTHS[m - 1]} ${d}, ${y}`;
+  }
+
+  function getInitials(name) {
+    if (!name || !name.trim()) return "?";
+    const parts = name.trim().split(/\s+/);
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[1][0]).toUpperCase();
+    }
+    return parts[0].substring(0, 2).toUpperCase();
+  }
+
+  // ── Toast Notifications ──────────────────
+  let toastTimeout = null;
+  function showToast(msg) {
+    if (!$toast) return;
+    $toast.textContent = msg;
+    $toast.classList.remove("hidden");
+    $toast.classList.add("show");
+    clearTimeout(toastTimeout);
+    toastTimeout = setTimeout(() => {
+      $toast.classList.remove("show");
+    }, 2500);
+  }
+
+  // ── Name & Avatar Sync ───────────────────
+  function updateAvatarUI() {
+    const name = currentName.trim();
+    if (name) {
+      const palette = getDriverPalette(name);
+      $currentAvatar.textContent = getInitials(name);
+      $currentAvatar.style.background = palette.accent;
+      $currentAvatar.style.color = "#fff";
+      $currentAvatar.style.borderColor = palette.border;
+      $currentAvatar.style.boxShadow = `0 0 12px ${palette.bg}`;
+      $modalMyName.textContent = name;
+    } else {
+      $currentAvatar.textContent = "?";
+      $currentAvatar.style.background = "var(--surface2)";
+      $currentAvatar.style.color = "var(--text-dim)";
+      $currentAvatar.style.borderColor = "var(--border)";
+      $currentAvatar.style.boxShadow = "none";
+      $modalMyName.textContent = "Me";
+    }
+  }
+
+  function setDriverName(name) {
+    currentName = name.trim();
+    $nameInput.value = currentName;
+    localStorage.setItem(STORAGE_NAME_KEY, currentName);
+    updateAvatarUI();
+    renderQuickDrivers();
+  }
+
+  // ── Render Quick Driver Chips ────────────
+  function renderQuickDrivers() {
+    // Collect all distinct names currently in bookings + current name
+    const activeNames = new Set();
+    if (currentName.trim()) activeNames.add(currentName.trim());
+    Object.values(bookings).forEach(name => {
+      if (name && typeof name === "string" && name.trim()) {
+        activeNames.add(name.trim());
+      }
+    });
+
+    $quickDrivers.innerHTML = "";
+
+    if (activeNames.size === 0) {
+      $quickContainer.classList.add("hidden");
+      return;
+    }
+
+    $quickContainer.classList.remove("hidden");
+
+    activeNames.forEach(name => {
+      const palette = getDriverPalette(name);
+      const isSelected = (currentName.trim().toLowerCase() === name.toLowerCase());
+
+      const chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = `quick-driver-chip ${isSelected ? "active" : ""}`;
+      chip.innerHTML = `
+        <span class="chip-dot" style="background: ${palette.accent}"></span>
+        <span class="chip-name">${name}</span>
+      `;
+
+      if (isSelected) {
+        chip.style.borderColor = palette.accent;
+        chip.style.background = palette.bg;
+      }
+
+      chip.addEventListener("click", () => {
+        setDriverName(name);
+        showToast(`🚗 Driving as ${name}`);
+      });
+
+      $quickDrivers.appendChild(chip);
+    });
+  }
+
+  // ── API Sync ─────────────────────────────
+  async function fetchBookings(isSilent = false) {
+    try {
+      if (!isSilent) {
+        $syncStatus.innerHTML = '<span class="sync-dot pulsing"></span> Syncing...';
+      }
+      const res = await fetch("/api/bookings");
+      if (!res.ok) throw new Error("Server error: " + res.status);
+      const data = await res.json();
+      bookings = data.bookings || {};
+
+      renderCalendar();
+      renderLegend();
+      renderStats();
+      renderQuickDrivers();
+
+      $syncStatus.innerHTML = '<span class="sync-dot online"></span> Live';
+    } catch (err) {
+      console.error("Fetch bookings failed:", err);
+      $syncStatus.innerHTML = '<span class="sync-dot offline"></span> Offline';
+    }
+  }
+
+  async function saveDayBooking(date, name) {
+    try {
+      $syncStatus.innerHTML = '<span class="sync-dot pulsing"></span> Saving...';
+      const res = await fetch("/api/bookings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date, name })
+      });
+      if (!res.ok) throw new Error("Save failed");
+      $syncStatus.innerHTML = '<span class="sync-dot online"></span> Saved';
+    } catch (err) {
+      console.error("Save booking failed:", err);
+      showToast("⚠️ Could not sync with server. Check connection.");
+      $syncStatus.innerHTML = '<span class="sync-dot offline"></span> Error';
+    }
   }
 
   // ── Render Weekday Headers ───────────────
@@ -289,19 +257,19 @@
 
     $title.textContent = `${MONTHS[month]} ${year}`;
 
-    const firstDay   = new Date(year, month, 1).getDay();
+    const firstDay    = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
 
     $grid.innerHTML = "";
 
-    // Empty leading cells
+    // Empty lead cells
     for (let i = 0; i < firstDay; i++) {
       const empty = document.createElement("div");
       empty.classList.add("day-cell", "empty");
       $grid.appendChild(empty);
     }
 
-    // Day cells
+    // Days in current month
     for (let d = 1; d <= daysInMonth; d++) {
       const key  = dateKey(year, month, d);
       const cell = document.createElement("div");
@@ -312,9 +280,6 @@
       if (isPast(year, month, d))  cell.classList.add("past");
 
       const owner = bookings[key];
-      if (owner) {
-        cell.classList.add(`booked-${owner}`);
-      }
 
       // Day number
       const numSpan = document.createElement("span");
@@ -322,229 +287,342 @@
       numSpan.textContent = d;
       cell.appendChild(numSpan);
 
-      // Owner label
+      // Booked state & dynamic driver styling
       if (owner) {
+        cell.classList.add("booked");
+        const palette = getDriverPalette(owner);
+        cell.style.setProperty("--driver-accent", palette.accent);
+        cell.style.setProperty("--driver-bg", palette.bg);
+        cell.style.setProperty("--driver-border", palette.border);
+        cell.style.setProperty("--driver-text", palette.text);
+
         const ownerSpan = document.createElement("span");
         ownerSpan.classList.add("day-owner");
-        ownerSpan.textContent = names[owner];
+        ownerSpan.textContent = owner;
+        ownerSpan.title = `Booked by ${owner}`;
         cell.appendChild(ownerSpan);
       }
 
       // Click handler
-      if (!isPast(year, month, d)) {
-        cell.addEventListener("click", () => handleDayClick(key, cell));
-      }
+      cell.addEventListener("click", () => handleDayClick(key, cell));
 
       $grid.appendChild(cell);
     }
-    renderStats();
-  }
-
-  // ── Render Statistics ────────────────────
-  function renderStats() {
-    const monthsData = {};
-
-    // Group bookings by YYYY-MM
-    Object.entries(bookings).forEach(([dateStr, user]) => {
-      const monthKey = dateStr.substring(0, 7); // "YYYY-MM"
-      if (!monthsData[monthKey]) {
-        monthsData[monthKey] = { A: 0, B: 0 };
-      }
-      monthsData[monthKey][user]++;
-    });
-
-    const sortedMonths = Object.keys(monthsData).sort().reverse();
-
-    if (sortedMonths.length === 0) {
-      $statsRows.innerHTML = '<div class="stats-empty">No bookings yet. Start driving!</div>';
-      return;
-    }
-
-    $statsRows.innerHTML = "";
-
-    sortedMonths.forEach(monthKey => {
-      const [year, month] = monthKey.split("-");
-      const monthName = MONTHS[parseInt(month) - 1];
-      const data = monthsData[monthKey];
-      
-      const total = data.A + data.B;
-      const pctA = (data.A / total) * 100;
-      const pctB = (data.B / total) * 100;
-
-      let winnerLabel = "Tie";
-      let winnerClass = "winner-tie";
-      if (data.A > data.B) {
-        winnerLabel = `${names.A} wins!`;
-        winnerClass = "winner-A";
-      } else if (data.B > data.A) {
-        winnerLabel = `${names.B} wins!`;
-        winnerClass = "winner-B";
-      }
-
-      const row = document.createElement("div");
-      row.classList.add("stats-month-row");
-      row.innerHTML = `
-        <div class="stats-month-header">
-          <span class="stats-month-label">${monthName} ${year}</span>
-          <span class="stats-winner-badge ${winnerClass}">${winnerLabel}</span>
-        </div>
-        <div class="stats-bars">
-          <div class="stats-bar-row">
-            <span class="stats-bar-name">${names.A}</span>
-            <div class="stats-bar-track">
-              <div class="stats-bar-fill fill-A" style="width: ${pctA}%"></div>
-            </div>
-            <span class="stats-bar-count">${data.A}</span>
-          </div>
-          <div class="stats-bar-row">
-            <span class="stats-bar-name">${names.B}</span>
-            <div class="stats-bar-track">
-              <div class="stats-bar-fill fill-B" style="width: ${pctB}%"></div>
-            </div>
-            <span class="stats-bar-count">${data.B}</span>
-          </div>
-        </div>
-      `;
-      $statsRows.appendChild(row);
-    });
   }
 
   // ── Day Click Logic ──────────────────────
   function handleDayClick(key, cell) {
-    const current = bookings[key];
+    const [y, m, d] = key.split("-").map(Number);
+    const existing = bookings[key];
 
-    if (!current) {
-      bookings[key] = currentUser;
-      saveBookings();
-      const msg = `🚗 ${names[currentUser]} booked ${formatDateNice(key)}`;
-      showToast(msg);
-      sendPartnerNotification("Red Cheeks Booking", msg);
-    } else if (current === currentUser) {
-      delete bookings[key];
-      saveBookings();
-      const msg = `❌ Booking removed for ${formatDateNice(key)}`;
-      showToast(msg);
-      sendPartnerNotification("Red Cheeks Update", msg);
-    } else {
-      showToast(`🔒 That day is booked by ${names[current]}`);
-      cell.classList.add("pulse");
-      setTimeout(() => cell.classList.remove("pulse"), 400);
+    // Disallow altering past dates
+    if (isPast(y, m - 1, d)) {
+      if (existing) {
+        showToast(`📅 ${existing} drove on ${formatDateNice(key)}`);
+      } else {
+        showToast("⚠️ Past dates cannot be booked");
+      }
       return;
     }
 
-    renderCalendar();
-    const newCell = $grid.querySelector(`[data-date="${key}"]`);
-    if (newCell) {
-      newCell.classList.add("pulse");
-      setTimeout(() => newCell.classList.remove("pulse"), 400);
+    const activeDriver = currentName.trim();
+
+    // If day is free
+    if (!existing) {
+      if (!activeDriver) {
+        showToast("⚠️ Enter your name at the top to book!");
+        $nameInput.focus();
+        $nameInput.classList.add("input-attention");
+        setTimeout(() => $nameInput.classList.remove("input-attention"), 1000);
+        return;
+      }
+
+      // Optimistic update
+      bookings[key] = activeDriver;
+      renderCalendar();
+      renderLegend();
+      renderStats();
+      renderQuickDrivers();
+
+      showToast(`🚗 ${activeDriver} booked ${formatDateNice(key)}`);
+      saveDayBooking(key, activeDriver);
+      return;
     }
+
+    // Day is already booked -> Open interactive modal
+    openDayModal(key, existing);
   }
 
-  function formatDateNice(key) {
-    const [y, m, d] = key.split("-").map(Number);
-    return `${MONTHS[m - 1]} ${d}`;
+  // ── Modal Handling ───────────────────────
+  function openDayModal(key, ownerName) {
+    activeModalDate = key;
+    const palette = getDriverPalette(ownerName);
+    const activeDriver = currentName.trim();
+
+    $modalTitle.textContent = formatDateNice(key);
+    $modalBadge.textContent = `Booked by ${ownerName}`;
+    $modalBadge.style.background = palette.bg;
+    $modalBadge.style.color = palette.text;
+    $modalBadge.style.borderColor = palette.border;
+
+    if (activeDriver && activeDriver.toLowerCase() === ownerName.toLowerCase()) {
+      $modalDesc.textContent = `You currently have this day reserved.`;
+      $modalClaimBtn.classList.add("hidden");
+      $modalClearBtn.textContent = "Cancel My Booking";
+    } else {
+      $modalDesc.textContent = `This day is currently taken by ${ownerName}.`;
+      $modalClaimBtn.classList.remove("hidden");
+      $modalMyName.textContent = activeDriver || "Me";
+      $modalClearBtn.textContent = "Free Up This Day";
+    }
+
+    $dayModal.classList.remove("hidden");
   }
 
-  // ── User Switcher ────────────────────────
-  function setActiveUser(user) {
-    currentUser = user;
-    $btnA.classList.toggle("active", user === "A");
-    $btnB.classList.toggle("active", user === "B");
+  function closeDayModal() {
+    $dayModal.classList.add("hidden");
+    activeModalDate = null;
   }
 
-  // ── Sync Names to UI ────────────────────
-  function syncNames() {
-    $nameA.textContent  = names.A;
-    $nameB.textContent  = names.B;
-    $legendA.textContent = names.A;
-    $legendB.textContent = names.B;
-    $inputA.value = names.A;
-    $inputB.value = names.B;
+  // Claim modal date
+  $modalClaimBtn.addEventListener("click", () => {
+    if (!activeModalDate) return;
+    const activeDriver = currentName.trim();
+    if (!activeDriver) {
+      showToast("⚠️ Enter your name first!");
+      closeDayModal();
+      $nameInput.focus();
+      return;
+    }
 
-    document.querySelector(".avatar-a").textContent = names.A.charAt(0).toUpperCase();
-    document.querySelector(".avatar-b").textContent = names.B.charAt(0).toUpperCase();
+    bookings[activeModalDate] = activeDriver;
+    renderCalendar();
+    renderLegend();
+    renderStats();
+    renderQuickDrivers();
+
+    showToast(`🚗 Reassigned to ${activeDriver}`);
+    saveDayBooking(activeModalDate, activeDriver);
+    closeDayModal();
+  });
+
+  // Free up modal date
+  $modalClearBtn.addEventListener("click", () => {
+    if (!activeModalDate) return;
+    const key = activeModalDate;
+    delete bookings[key];
+
+    renderCalendar();
+    renderLegend();
+    renderStats();
+    renderQuickDrivers();
+
+    showToast(`🗑️ Freed up ${formatDateNice(key)}`);
+    saveDayBooking(key, null);
+    closeDayModal();
+  });
+
+  $modalCloseBtn.addEventListener("click", closeDayModal);
+  $modalDismissBtn.addEventListener("click", closeDayModal);
+  $dayModal.addEventListener("click", (e) => {
+    if (e.target === $dayModal) closeDayModal();
+  });
+
+  // ── Legend ───────────────────────────────
+  function renderLegend() {
+    const year  = viewDate.getFullYear();
+    const month = viewDate.getMonth();
+    const monthPrefix = `${year}-${String(month + 1).padStart(2, "0")}`;
+
+    // Find all distinct drivers with bookings this month
+    const driversThisMonth = new Set();
+    Object.entries(bookings).forEach(([dateStr, name]) => {
+      if (dateStr.startsWith(monthPrefix) && name && name.trim()) {
+        driversThisMonth.add(name.trim());
+      }
+    });
+
+    $legend.innerHTML = "";
+
+    driversThisMonth.forEach(name => {
+      const palette = getDriverPalette(name);
+      const item = document.createElement("div");
+      item.className = "legend-item";
+      item.innerHTML = `
+        <span class="dot" style="background: ${palette.accent}"></span>
+        <span>${name}</span>
+      `;
+      $legend.appendChild(item);
+    });
+
+    // Always include available indicator
+    const freeItem = document.createElement("div");
+    freeItem.className = "legend-item";
+    freeItem.innerHTML = `
+      <span class="dot dot-free"></span>
+      <span>Available</span>
+    `;
+    $legend.appendChild(freeItem);
   }
 
-  // ── Event Bindings ───────────────────────
+  // ── Render Monthly Stats ─────────────────
+  function renderStats() {
+    const year  = viewDate.getFullYear();
+    const month = viewDate.getMonth();
+    const monthPrefix = `${year}-${String(month + 1).padStart(2, "0")}`;
+
+    const counts = {};
+    let totalDays = 0;
+
+    Object.entries(bookings).forEach(([dateStr, name]) => {
+      if (dateStr.startsWith(monthPrefix) && name && name.trim()) {
+        const clean = name.trim();
+        counts[clean] = (counts[clean] || 0) + 1;
+        totalDays++;
+      }
+    });
+
+    $statsRows.innerHTML = "";
+
+    const drivers = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+
+    if (drivers.length === 0) {
+      $statsRows.innerHTML = `
+        <div class="stats-empty">
+          No bookings for ${MONTHS[month]} ${year}. Click any date to book!
+        </div>
+      `;
+      return;
+    }
+
+    const topDriver = drivers[0];
+    const topCount = counts[topDriver];
+
+    const monthHeader = document.createElement("div");
+    monthHeader.className = "stats-month-header";
+    monthHeader.innerHTML = `
+      <span class="stats-month-label">${MONTHS[month]} ${year} (${totalDays} booked)</span>
+      <span class="stats-winner-badge">🏆 ${topDriver} leads (${topCount}d)</span>
+    `;
+    $statsRows.appendChild(monthHeader);
+
+    const barsContainer = document.createElement("div");
+    barsContainer.className = "stats-bars";
+
+    drivers.forEach(driver => {
+      const count = counts[driver];
+      const pct = Math.round((count / totalDays) * 100);
+      const palette = getDriverPalette(driver);
+
+      const row = document.createElement("div");
+      row.className = "stats-bar-row";
+      row.innerHTML = `
+        <span class="stats-bar-name" title="${driver}">${driver}</span>
+        <div class="stats-bar-track">
+          <div class="stats-bar-fill" style="width: ${pct}%; background: ${palette.accent}"></div>
+        </div>
+        <span class="stats-bar-count">${count}d (${pct}%)</span>
+      `;
+      barsContainer.appendChild(row);
+    });
+
+    $statsRows.appendChild(barsContainer);
+  }
+
+  // ── Board Actions ────────────────────────
+  $btnClearMy.addEventListener("click", async () => {
+    const driver = currentName.trim();
+    if (!driver) {
+      showToast("⚠️ Enter your name first!");
+      $nameInput.focus();
+      return;
+    }
+
+    if (!confirm(`Clear all bookings on the calendar for "${driver}"?`)) return;
+
+    // Optimistic removal
+    Object.keys(bookings).forEach(key => {
+      if (bookings[key] && bookings[key].trim().toLowerCase() === driver.toLowerCase()) {
+        delete bookings[key];
+      }
+    });
+
+    renderCalendar();
+    renderLegend();
+    renderStats();
+    renderQuickDrivers();
+
+    try {
+      await fetch("/api/bookings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "clearUser", name: driver })
+      });
+      showToast(`🗑️ Cleared all bookings for ${driver}`);
+    } catch (err) {
+      console.error(err);
+      showToast("⚠️ Server sync error");
+    }
+  });
+
+  $btnClearAll.addEventListener("click", async () => {
+    if (!confirm("Are you sure you want to clear the ENTIRE calendar board for everyone?")) return;
+
+    bookings = {};
+    renderCalendar();
+    renderLegend();
+    renderStats();
+    renderQuickDrivers();
+
+    try {
+      await fetch("/api/bookings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "clearAll" })
+      });
+      showToast("🗑️ Board cleared");
+    } catch (err) {
+      console.error(err);
+      showToast("⚠️ Server sync error");
+    }
+  });
+
+  // ── Event Listeners ──────────────────────
+  $nameInput.addEventListener("input", (e) => {
+    currentName = e.target.value;
+    localStorage.setItem(STORAGE_NAME_KEY, currentName);
+    updateAvatarUI();
+  });
+
+  $nameInput.addEventListener("blur", () => {
+    renderQuickDrivers();
+  });
+
   $btnPrev.addEventListener("click", () => {
     viewDate.setMonth(viewDate.getMonth() - 1);
     renderCalendar();
+    renderLegend();
+    renderStats();
   });
 
   $btnNext.addEventListener("click", () => {
     viewDate.setMonth(viewDate.getMonth() + 1);
     renderCalendar();
+    renderLegend();
+    renderStats();
   });
 
   $btnToday.addEventListener("click", () => {
     viewDate = new Date();
     renderCalendar();
+    renderLegend();
+    renderStats();
   });
 
-  $btnA.addEventListener("click", () => setActiveUser("A"));
-  $btnB.addEventListener("click", () => setActiveUser("B"));
-
-  $btnSave.addEventListener("click", async () => {
-    const a = $inputA.value.trim() || "Me";
-    const b = $inputB.value.trim() || "Bro";
-    names.A = a;
-    names.B = b;
-    
-    if (account) {
-      account.username = a;
-      account.partner_name = b;
-      saveAccount(account);
-      
-      try {
-        await fetch('/api/profile', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            email: account.email, 
-            username: a, 
-            partner_name: b 
-          })
-        });
-      } catch (e) { console.error("Profile sync failed", e); }
-    }
-    
-    syncNames();
-    renderCalendar();
-    showToast("✅ Names saved & synced!");
+  $btnRefresh.addEventListener("click", () => {
+    fetchBookings(false);
+    showToast("🔄 Board refreshed!");
   });
-
-  $btnClear.addEventListener("click", () => {
-    if (confirm("Clear ALL bookings? This cannot be undone.")) {
-      bookings = {};
-      saveBookings();
-      renderCalendar();
-      showToast("🗑️ All bookings cleared");
-    }
-  });
-
-  // Auth Events
-  $btnSignup.addEventListener("click", handleSignUp);
-  $btnLogin.addEventListener("click", handleLogin);
-  $btnReset.addEventListener("click", handleResetPassword);
-
-  $linkToLogin.addEventListener("click", (e) => { e.preventDefault(); toggleAuthForm("login"); });
-  $linkToSignup.addEventListener("click", (e) => { e.preventDefault(); toggleAuthForm("signup"); });
-  $linkForgot.addEventListener("click", (e) => { e.preventDefault(); toggleAuthForm("reset"); });
-  $linkBackLogin.addEventListener("click", (e) => { e.preventDefault(); toggleAuthForm("login"); });
-  
-  // ── Logout Handler ───────────────────────
-  const logoutHandler = () => {
-    // Clear session and account info to ensure proper logout
-    localStorage.removeItem(SESSION_KEY);
-    localStorage.removeItem(ACCOUNT_KEY);
-    // Optionally, you could also clear other auth related storage
-    location.reload();
-  };
-
-  $btnLogout.addEventListener("click", logoutHandler);
-  if ($btnHeaderLogout) {
-    $btnHeaderLogout.addEventListener("click", logoutHandler);
-  }
 
   $btnStatsToggle.addEventListener("click", () => {
     const isCollapsed = $statsBody.classList.toggle("collapsed");
@@ -552,16 +630,31 @@
     $btnStatsToggle.setAttribute("aria-expanded", !isCollapsed);
   });
 
-  // ── Keyboard shortcuts ───────────────────
+  // Keyboard navigation
   document.addEventListener("keydown", (e) => {
     if (e.target.tagName === "INPUT") return;
     if (e.key === "ArrowLeft")  { $btnPrev.click(); }
     if (e.key === "ArrowRight") { $btnNext.click(); }
-    if (e.key === "1") setActiveUser("A");
-    if (e.key === "2") setActiveUser("B");
+    if (e.key === "t" || e.key === "T") { $btnToday.click(); }
+    if (e.key === "Escape") { closeDayModal(); }
   });
 
+  // ── Auto Sync Polling ────────────────────
+  function startPolling() {
+    clearInterval(syncTimer);
+    // Poll every 15 seconds to keep all devices up-to-date
+    syncTimer = setInterval(() => {
+      fetchBookings(true);
+    }, 15000);
+  }
+
   // ── Boot ─────────────────────────────────
+  if (currentName) {
+    $nameInput.value = currentName;
+  }
+  updateAvatarUI();
   renderWeekdays();
-  checkAuth();
+  renderCalendar();
+  fetchBookings(false);
+  startPolling();
 })();
