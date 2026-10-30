@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Red Cheeks — Shared Car Calendar</title>
-  <meta name="description" content="Red Cheeks: An open, shared family car booking calendar. Everyone can see the board and put their name." />
+  <meta name="description" content="Red Cheeks: An open, shared family car booking calendar with custom time slots and conflict protection." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -39,7 +39,7 @@
           </div>
           <div class="header-titles">
             <h1>Red Cheeks</h1>
-            <p class="subtitle">Shared Family Car Calendar</p>
+            <p class="subtitle">Shared Car Schedule & Time Slots</p>
           </div>
         </div>
         <button id="btn-refresh" class="header-icon-btn" title="Refresh Board" aria-label="Refresh Board">
@@ -128,21 +128,60 @@
     </details>
   </main>
 
-  <!-- ───── Day Booking Action Modal ───── -->
+  <!-- ───── Time Slot Day Booking Modal ───── -->
   <div id="day-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-date-title">
     <div class="modal-card">
       <div class="modal-header">
-        <h3 id="modal-date-title">October 31, 2026</h3>
+        <div>
+          <h3 id="modal-date-title">October 31, 2026</h3>
+          <p class="modal-subtitle">Schedule & time slots</p>
+        </div>
         <button id="btn-modal-close" class="modal-close-btn" aria-label="Close modal">&times;</button>
       </div>
-      <div class="modal-body">
-        <div id="modal-status-badge" class="modal-status-badge">Booked by Matan</div>
-        <p id="modal-desc" class="modal-desc">What would you like to do with this reservation?</p>
+
+      <!-- Existing Bookings On This Day -->
+      <div class="modal-section">
+        <div class="section-title-row">
+          <span class="modal-section-title">Reserved Times Today</span>
+          <span id="modal-slots-count" class="count-pill">0</span>
+        </div>
+        <div id="modal-existing-slots" class="existing-slots-list">
+          <!-- Populated by JS -->
+        </div>
       </div>
-      <div class="modal-actions">
-        <button id="btn-modal-claim" class="primary-modal-btn">🚗 Book for <span id="modal-my-name">Me</span></button>
-        <button id="btn-modal-clear-day" class="danger-modal-btn">Free Up This Day</button>
-        <button id="btn-modal-dismiss" class="subtle-modal-btn">Close</button>
+
+      <!-- Add New Time Slot Form -->
+      <div class="modal-section book-form-section">
+        <span class="modal-section-title">Book a Time Slot</span>
+        
+        <!-- Preset quick buttons -->
+        <div class="preset-buttons">
+          <button type="button" class="preset-btn" data-start="08:00" data-end="12:00">Morning (8-12)</button>
+          <button type="button" class="preset-btn" data-start="12:00" data-end="17:00">Noon (12-17)</button>
+          <button type="button" class="preset-btn" data-start="17:00" data-end="22:00">Evening (17-22)</button>
+          <button type="button" class="preset-btn" data-start="08:00" data-end="22:00">All Day</button>
+        </div>
+
+        <div class="time-picker-row">
+          <div class="time-field">
+            <label for="input-start-time">From</label>
+            <input type="time" id="input-start-time" value="09:00" step="900" />
+          </div>
+          <div class="time-separator">→</div>
+          <div class="time-field">
+            <label for="input-end-time">To</label>
+            <input type="time" id="input-end-time" value="13:00" step="900" />
+          </div>
+        </div>
+
+        <!-- Live Conflict Alert -->
+        <div id="modal-conflict-msg" class="conflict-alert hidden">
+          ⚠️ Time overlaps with an existing booking
+        </div>
+
+        <button id="btn-confirm-slot" class="primary-modal-btn">
+          🚗 Reserve as <span id="modal-driver-preview">Driver</span>
+        </button>
       </div>
     </div>
   </div>

@@ -1,19 +1,27 @@
 /* ═══════════════════════════════════════════
-   Red Cheeks — Open Shared Car Calendar
+   Red Cheeks — Shared Car Calendar with Time Slots
    ═══════════════════════════════════════════ */
 
 (() => {
   "use strict";
 
   // ── Storage Keys ─────────────────────────
-  const STORAGE_NAME_KEY = "redcheeks_driver_name";
+  const STORAGE_NAME_KEY  = "redcheeks_driver_name";
+  const STORAGE_TOKEN_KEY = "redcheeks_client_token";
+
+  // ── Initialize Client Token ──────────────
+  let clientToken = localStorage.getItem(STORAGE_TOKEN_KEY);
+  if (!clientToken) {
+    clientToken = "tok_" + Date.now() + "_" + Math.random().toString(36).substring(2, 9);
+    localStorage.setItem(STORAGE_TOKEN_KEY, clientToken);
+  }
 
   // ── State ────────────────────────────────
-  let currentName = localStorage.getItem(STORAGE_NAME_KEY) || "";
-  let viewDate    = new Date();
-  let bookings    = {}; // { "YYYY-MM-DD": "Name" }
+  let currentName     = localStorage.getItem(STORAGE_NAME_KEY) || "";
+  let viewDate        = new Date();
+  let allBookings     = []; // Array of { id, date, startTime, endTime, name, token }
   let activeModalDate = null;
-  let syncTimer   = null;
+  let syncTimer       = null;
 
   const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const MONTHS   = [
@@ -73,15 +81,17 @@
   // Modal DOM
   const $dayModal        = document.getElementById("day-modal");
   const $modalTitle      = document.getElementById("modal-date-title");
-  const $modalBadge      = document.getElementById("modal-status-badge");
-  const $modalDesc       = document.getElementById("modal-desc");
-  const $modalClaimBtn   = document.getElementById("btn-modal-claim");
-  const $modalMyName     = document.getElementById("modal-my-name");
-  const $modalClearBtn   = document.getElementById("btn-modal-clear-day");
   const $modalCloseBtn   = document.getElementById("btn-modal-close");
-  const $modalDismissBtn = document.getElementById("btn-modal-dismiss");
+  const $modalSlotsCount = document.getElementById("modal-slots-count");
+  const $modalSlotsList  = document.getElementById("modal-existing-slots");
+  const $startTimeInput  = document.getElementById("input-start-time");
+  const $endTimeInput    = document.getElementById("input-end-time");
+  const $conflictMsg     = document.getElementById("modal-conflict-msg");
+  const $btnConfirmSlot  = document.getElementById("btn-confirm-slot");
+  const $modalDriverPrev = document.getElementById("modal-driver-preview");
+  const $presetBtns      = document.querySelectorAll(".preset-btn");
 
-  // ── Helper Formatting ────────────────────
+  // ── Helper Functions ─────────────────────
   function dateKey(y, m, d) {
     return `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
   }
@@ -112,6 +122,33 @@
     return parts[0].substring(0, 2).toUpperCase();
   }
 
+  function getBookingsForDate(dateStr) {
+    return allBookings
+      .filter(b => b.date === dateStr)
+      .sort((a, b) => (a.startTime || "00:00").localeCompare(b.startTime || "00:00"));
+  }
+
+  // Check if booking belongs to current active user
+  function isMyBooking(booking) {
+    if (!booking) return false;
+    const active = currentName.trim().toLowerCase();
+    const bName = (booking.name || "").trim().toLowerCase();
+    const tokenMatch = Boolean(booking.token && clientToken && booking.token === clientToken);
+    const nameMatch = Boolean(active && bName && active === bName);
+    return tokenMatch || nameMatch;
+  }
+
+  // Collision detection: [A, B] and [C, D] overlap if A < D and B > C
+  function findConflict(dateStr, start, end, excludeId = null) {
+    const dayBookings = getBookingsForDate(dateStr);
+    return dayBookings.find(b => {
+      if (excludeId && b.id === excludeId) return false;
+      const bStart = b.startTime || "00:00";
+      const bEnd   = b.endTime || "23:59";
+      return start < bEnd && end > bStart;
+    });
+  }
+
   // ── Toast Notifications ──────────────────
   let toastTimeout = null;
   function showToast(msg) {
@@ -122,7 +159,7 @@
     clearTimeout(toastTimeout);
     toastTimeout = setTimeout(() => {
       $toast.classList.remove("show");
-    }, 2500);
+    }, 2800);
   }
 
   // ── Name & Avatar Sync ───────────────────
@@ -135,14 +172,14 @@
       $currentAvatar.style.color = "#fff";
       $currentAvatar.style.borderColor = palette.border;
       $currentAvatar.style.boxShadow = `0 0 12px ${palette.bg}`;
-      $modalMyName.textContent = name;
+      $modalDriverPrev.textContent = name;
     } else {
       $currentAvatar.textContent = "?";
       $currentAvatar.style.background = "var(--surface2)";
       $currentAvatar.style.color = "var(--text-dim)";
       $currentAvatar.style.borderColor = "var(--border)";
       $currentAvatar.style.boxShadow = "none";
-      $modalMyName.textContent = "Me";
+      $modalDriverPrev.textContent = "Driver";
     }
   }
 
@@ -152,17 +189,15 @@
     localStorage.setItem(STORAGE_NAME_KEY, currentName);
     updateAvatarUI();
     renderQuickDrivers();
+    if (activeModalDate) checkLiveConflict();
   }
 
   // ── Render Quick Driver Chips ────────────
   function renderQuickDrivers() {
-    // Collect all distinct names currently in bookings + current name
     const activeNames = new Set();
     if (currentName.trim()) activeNames.add(currentName.trim());
-    Object.values(bookings).forEach(name => {
-      if (name && typeof name === "string" && name.trim()) {
-        activeNames.add(name.trim());
-      }
+    allBookings.forEach(b => {
+      if (b.name && b.name.trim()) activeNames.add(b.name.trim());
     });
 
     $quickDrivers.innerHTML = "";
@@ -193,7 +228,7 @@
 
       chip.addEventListener("click", () => {
         setDriverName(name);
-        showToast(`🚗 Driving as ${name}`);
+        showToast(`🚗 Switched driver to ${name}`);
       });
 
       $quickDrivers.appendChild(chip);
@@ -209,34 +244,21 @@
       const res = await fetch("/api/bookings");
       if (!res.ok) throw new Error("Server error: " + res.status);
       const data = await res.json();
-      bookings = data.bookings || {};
+      allBookings = Array.isArray(data.bookings) ? data.bookings : [];
 
       renderCalendar();
       renderLegend();
       renderStats();
       renderQuickDrivers();
 
+      if (activeModalDate) {
+        renderModalSlots(activeModalDate);
+      }
+
       $syncStatus.innerHTML = '<span class="sync-dot online"></span> Live';
     } catch (err) {
       console.error("Fetch bookings failed:", err);
       $syncStatus.innerHTML = '<span class="sync-dot offline"></span> Offline';
-    }
-  }
-
-  async function saveDayBooking(date, name) {
-    try {
-      $syncStatus.innerHTML = '<span class="sync-dot pulsing"></span> Saving...';
-      const res = await fetch("/api/bookings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date, name })
-      });
-      if (!res.ok) throw new Error("Save failed");
-      $syncStatus.innerHTML = '<span class="sync-dot online"></span> Saved';
-    } catch (err) {
-      console.error("Save booking failed:", err);
-      showToast("⚠️ Could not sync with server. Check connection.");
-      $syncStatus.innerHTML = '<span class="sync-dot offline"></span> Error';
     }
   }
 
@@ -279,7 +301,7 @@
       if (isToday(year, month, d)) cell.classList.add("today");
       if (isPast(year, month, d))  cell.classList.add("past");
 
-      const owner = bookings[key];
+      const daySlots = getBookingsForDate(key);
 
       // Day number
       const numSpan = document.createElement("span");
@@ -287,94 +309,82 @@
       numSpan.textContent = d;
       cell.appendChild(numSpan);
 
-      // Booked state & dynamic driver styling
-      if (owner) {
-        cell.classList.add("booked");
-        const palette = getDriverPalette(owner);
-        cell.style.setProperty("--driver-accent", palette.accent);
-        cell.style.setProperty("--driver-bg", palette.bg);
-        cell.style.setProperty("--driver-border", palette.border);
-        cell.style.setProperty("--driver-text", palette.text);
+      // Booked time slots chips
+      if (daySlots.length > 0) {
+        cell.classList.add("has-bookings");
+        const slotsWrapper = document.createElement("div");
+        slotsWrapper.classList.add("cell-slots-wrapper");
 
-        const ownerSpan = document.createElement("span");
-        ownerSpan.classList.add("day-owner");
-        ownerSpan.textContent = owner;
-        ownerSpan.title = `Booked by ${owner}`;
-        cell.appendChild(ownerSpan);
+        // Show up to 2 slots, then +X more
+        const maxDisplay = 2;
+        daySlots.slice(0, maxDisplay).forEach(slot => {
+          const palette = getDriverPalette(slot.name);
+          const chip = document.createElement("div");
+          chip.className = "cell-slot-chip";
+          chip.style.background = palette.bg;
+          chip.style.borderColor = palette.border;
+          chip.style.color = palette.text;
+
+          const timeBrief = (slot.startTime && slot.endTime)
+            ? `${slot.startTime.split(":")[0]}-${slot.endTime.split(":")[0]}`
+            : "All Day";
+
+          chip.textContent = `${timeBrief} ${slot.name}`;
+          chip.title = `${slot.name}: ${slot.startTime || '00:00'} - ${slot.endTime || '23:59'}`;
+          slotsWrapper.appendChild(chip);
+        });
+
+        if (daySlots.length > maxDisplay) {
+          const moreChip = document.createElement("div");
+          moreChip.className = "cell-slot-more";
+          moreChip.textContent = `+${daySlots.length - maxDisplay} more`;
+          slotsWrapper.appendChild(moreChip);
+        }
+
+        cell.appendChild(slotsWrapper);
       }
 
-      // Click handler
-      cell.addEventListener("click", () => handleDayClick(key, cell));
+      // Click handler to open schedule & booking modal
+      cell.addEventListener("click", () => handleDayClick(key));
 
       $grid.appendChild(cell);
     }
   }
 
-  // ── Day Click Logic ──────────────────────
-  function handleDayClick(key, cell) {
+  // ── Day Click ────────────────────────────
+  function handleDayClick(key) {
     const [y, m, d] = key.split("-").map(Number);
-    const existing = bookings[key];
 
-    // Disallow altering past dates
     if (isPast(y, m - 1, d)) {
-      if (existing) {
-        showToast(`📅 ${existing} drove on ${formatDateNice(key)}`);
+      const slots = getBookingsForDate(key);
+      if (slots.length > 0) {
+        openDayModal(key, true); // Open in read-only mode for past dates
       } else {
         showToast("⚠️ Past dates cannot be booked");
       }
       return;
     }
 
-    const activeDriver = currentName.trim();
-
-    // If day is free
-    if (!existing) {
-      if (!activeDriver) {
-        showToast("⚠️ Enter your name at the top to book!");
-        $nameInput.focus();
-        $nameInput.classList.add("input-attention");
-        setTimeout(() => $nameInput.classList.remove("input-attention"), 1000);
-        return;
-      }
-
-      // Optimistic update
-      bookings[key] = activeDriver;
-      renderCalendar();
-      renderLegend();
-      renderStats();
-      renderQuickDrivers();
-
-      showToast(`🚗 ${activeDriver} booked ${formatDateNice(key)}`);
-      saveDayBooking(key, activeDriver);
-      return;
-    }
-
-    // Day is already booked -> Open interactive modal
-    openDayModal(key, existing);
+    openDayModal(key, false);
   }
 
   // ── Modal Handling ───────────────────────
-  function openDayModal(key, ownerName) {
+  function openDayModal(key, isReadOnly = false) {
     activeModalDate = key;
-    const palette = getDriverPalette(ownerName);
-    const activeDriver = currentName.trim();
-
     $modalTitle.textContent = formatDateNice(key);
-    $modalBadge.textContent = `Booked by ${ownerName}`;
-    $modalBadge.style.background = palette.bg;
-    $modalBadge.style.color = palette.text;
-    $modalBadge.style.borderColor = palette.border;
 
-    if (activeDriver && activeDriver.toLowerCase() === ownerName.toLowerCase()) {
-      $modalDesc.textContent = `You currently have this day reserved.`;
-      $modalClaimBtn.classList.add("hidden");
-      $modalClearBtn.textContent = "Cancel My Booking";
+    const formSection = document.querySelector(".book-form-section");
+    if (isReadOnly) {
+      formSection.classList.add("hidden");
     } else {
-      $modalDesc.textContent = `This day is currently taken by ${ownerName}.`;
-      $modalClaimBtn.classList.remove("hidden");
-      $modalMyName.textContent = activeDriver || "Me";
-      $modalClearBtn.textContent = "Free Up This Day";
+      formSection.classList.remove("hidden");
     }
+
+    renderModalSlots(key);
+
+    // Pick sensible default time that doesn't conflict
+    suggestDefaultTimes(key);
+    checkLiveConflict();
 
     $dayModal.classList.remove("hidden");
   }
@@ -384,49 +394,218 @@
     activeModalDate = null;
   }
 
-  // Claim modal date
-  $modalClaimBtn.addEventListener("click", () => {
-    if (!activeModalDate) return;
-    const activeDriver = currentName.trim();
-    if (!activeDriver) {
-      showToast("⚠️ Enter your name first!");
-      closeDayModal();
-      $nameInput.focus();
+  function renderModalSlots(key) {
+    const daySlots = getBookingsForDate(key);
+    $modalSlotsCount.textContent = daySlots.length;
+    $modalSlotsList.innerHTML = "";
+
+    if (daySlots.length === 0) {
+      $modalSlotsList.innerHTML = `
+        <div class="empty-day-banner">
+          ✨ No reservations yet for this day. The car is free all day!
+        </div>
+      `;
       return;
     }
 
-    bookings[activeModalDate] = activeDriver;
-    renderCalendar();
-    renderLegend();
-    renderStats();
-    renderQuickDrivers();
+    daySlots.forEach(slot => {
+      const palette = getDriverPalette(slot.name);
+      const isOwner = isMyBooking(slot);
 
-    showToast(`🚗 Reassigned to ${activeDriver}`);
-    saveDayBooking(activeModalDate, activeDriver);
-    closeDayModal();
-  });
+      const row = document.createElement("div");
+      row.className = "slot-item-row";
+      row.style.borderLeftColor = palette.accent;
 
-  // Free up modal date
-  $modalClearBtn.addEventListener("click", () => {
+      const durationText = calculateDuration(slot.startTime, slot.endTime);
+
+      row.innerHTML = `
+        <div class="slot-info">
+          <div class="slot-time-range">
+            <span class="time-bold">${slot.startTime || "00:00"} – ${slot.endTime || "23:59"}</span>
+            <span class="slot-duration">(${durationText})</span>
+          </div>
+          <div class="slot-driver-badge" style="background: ${palette.bg}; color: ${palette.text}; border-color: ${palette.border}">
+            <span class="slot-avatar" style="background: ${palette.accent}">${getInitials(slot.name)}</span>
+            <span class="slot-driver-name">${slot.name}</span>
+          </div>
+        </div>
+        <div class="slot-actions">
+          ${isOwner 
+            ? `<button class="btn-cancel-slot" data-id="${slot.id}" title="Cancel your reservation">Delete</button>` 
+            : `<span class="locked-slot-badge" title="Only ${slot.name} can change this">🔒 Reserved</span>`}
+        </div>
+      `;
+
+      $modalSlotsList.appendChild(row);
+    });
+
+    // Attach cancel event listeners
+    $modalSlotsList.querySelectorAll(".btn-cancel-slot").forEach(btn => {
+      btn.addEventListener("click", () => handleCancelSlot(btn.dataset.id));
+    });
+  }
+
+  function calculateDuration(start, end) {
+    if (!start || !end) return "All Day";
+    const [sh, sm] = start.split(":").map(Number);
+    const [eh, em] = end.split(":").map(Number);
+    let diff = (eh * 60 + em) - (sh * 60 + sm);
+    if (diff <= 0) return "";
+    const hours = Math.floor(diff / 60);
+    const mins = diff % 60;
+    if (mins === 0) return `${hours}h`;
+    return `${hours}h ${mins}m`;
+  }
+
+  function suggestDefaultTimes(dateStr) {
+    const slots = getBookingsForDate(dateStr);
+    if (slots.length === 0) {
+      $startTimeInput.value = "09:00";
+      $endTimeInput.value = "13:00";
+      return;
+    }
+
+    // Try standard candidate intervals
+    const candidates = [
+      { s: "08:00", e: "12:00" },
+      { s: "12:00", e: "17:00" },
+      { s: "17:00", e: "22:00" },
+      { s: "09:00", e: "13:00" },
+      { s: "14:00", e: "18:00" }
+    ];
+
+    const freeCandidate = candidates.find(c => !findConflict(dateStr, c.s, c.e));
+    if (freeCandidate) {
+      $startTimeInput.value = freeCandidate.s;
+      $endTimeInput.value = freeCandidate.e;
+    }
+  }
+
+  // ── Live Conflict Checking ───────────────
+  function checkLiveConflict() {
     if (!activeModalDate) return;
-    const key = activeModalDate;
-    delete bookings[key];
 
-    renderCalendar();
-    renderLegend();
-    renderStats();
-    renderQuickDrivers();
+    const start = $startTimeInput.value;
+    const end   = $endTimeInput.value;
 
-    showToast(`🗑️ Freed up ${formatDateNice(key)}`);
-    saveDayBooking(key, null);
-    closeDayModal();
-  });
+    if (!start || !end || start >= end) {
+      $conflictMsg.textContent = "⚠️ End time must be later than start time";
+      $conflictMsg.classList.remove("hidden");
+      $btnConfirmSlot.disabled = true;
+      return;
+    }
 
-  $modalCloseBtn.addEventListener("click", closeDayModal);
-  $modalDismissBtn.addEventListener("click", closeDayModal);
-  $dayModal.addEventListener("click", (e) => {
-    if (e.target === $dayModal) closeDayModal();
-  });
+    const conflict = findConflict(activeModalDate, start, end);
+    if (conflict) {
+      $conflictMsg.textContent = `⚠️ Overlaps with ${conflict.name}'s reservation (${conflict.startTime} - ${conflict.endTime})`;
+      $conflictMsg.classList.remove("hidden");
+      $btnConfirmSlot.disabled = true;
+    } else {
+      $conflictMsg.classList.add("hidden");
+      $btnConfirmSlot.disabled = false;
+    }
+  }
+
+  // ── Confirm New Slot ─────────────────────
+  async function handleConfirmSlot() {
+    if (!activeModalDate) return;
+    const name = currentName.trim();
+
+    if (!name) {
+      showToast("⚠️ Please enter your name at the top first!");
+      $nameInput.focus();
+      $nameInput.classList.add("input-attention");
+      setTimeout(() => $nameInput.classList.remove("input-attention"), 1000);
+      return;
+    }
+
+    const start = $startTimeInput.value;
+    const end   = $endTimeInput.value;
+
+    if (!start || !end || start >= end) {
+      showToast("⚠️ Invalid time range selected");
+      return;
+    }
+
+    // Client-side conflict guard
+    const conflict = findConflict(activeModalDate, start, end);
+    if (conflict) {
+      showToast(`⚠️ Conflict: overlaps with ${conflict.name} (${conflict.startTime}-${conflict.endTime})`);
+      return;
+    }
+
+    $btnConfirmSlot.disabled = true;
+    $syncStatus.innerHTML = '<span class="sync-dot pulsing"></span> Reserving...';
+
+    try {
+      const res = await fetch("/api/bookings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          date: activeModalDate,
+          startTime: start,
+          endTime: end,
+          name: name,
+          token: clientToken
+        })
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.message || "Failed to reserve slot");
+      }
+
+      showToast(`🚗 Reserved: ${formatDateNice(activeModalDate)} (${start} - ${end})`);
+      await fetchBookings(true);
+      closeDayModal();
+    } catch (err) {
+      console.error(err);
+      showToast(`❌ ${err.message}`);
+      $btnConfirmSlot.disabled = false;
+    }
+  }
+
+  // ── Cancel My Slot ───────────────────────
+  async function handleCancelSlot(bookingId) {
+    const booking = allBookings.find(b => b.id === bookingId);
+    if (!booking) return;
+
+    if (!isMyBooking(booking)) {
+      showToast(`🔒 You cannot cancel a reservation belonging to ${booking.name}!`);
+      return;
+    }
+
+    if (!confirm(`Cancel your reservation on ${formatDateNice(booking.date)} (${booking.startTime} - ${booking.endTime})?`)) {
+      return;
+    }
+
+    $syncStatus.innerHTML = '<span class="sync-dot pulsing"></span> Canceling...';
+
+    try {
+      const res = await fetch("/api/bookings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "deleteBooking",
+          id: bookingId,
+          name: currentName.trim(),
+          token: clientToken
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || "Could not cancel booking");
+      }
+
+      showToast("🗑️ Reservation canceled");
+      await fetchBookings(true);
+    } catch (err) {
+      console.error(err);
+      showToast(`❌ ${err.message}`);
+    }
+  }
 
   // ── Legend ───────────────────────────────
   function renderLegend() {
@@ -434,11 +613,10 @@
     const month = viewDate.getMonth();
     const monthPrefix = `${year}-${String(month + 1).padStart(2, "0")}`;
 
-    // Find all distinct drivers with bookings this month
     const driversThisMonth = new Set();
-    Object.entries(bookings).forEach(([dateStr, name]) => {
-      if (dateStr.startsWith(monthPrefix) && name && name.trim()) {
-        driversThisMonth.add(name.trim());
+    allBookings.forEach(b => {
+      if (b.date && b.date.startsWith(monthPrefix) && b.name && b.name.trim()) {
+        driversThisMonth.add(b.name.trim());
       }
     });
 
@@ -455,7 +633,6 @@
       $legend.appendChild(item);
     });
 
-    // Always include available indicator
     const freeItem = document.createElement("div");
     freeItem.className = "legend-item";
     freeItem.innerHTML = `
@@ -471,38 +648,48 @@
     const month = viewDate.getMonth();
     const monthPrefix = `${year}-${String(month + 1).padStart(2, "0")}`;
 
-    const counts = {};
-    let totalDays = 0;
+    const driverStats = {};
+    let totalSlots = 0;
 
-    Object.entries(bookings).forEach(([dateStr, name]) => {
-      if (dateStr.startsWith(monthPrefix) && name && name.trim()) {
-        const clean = name.trim();
-        counts[clean] = (counts[clean] || 0) + 1;
-        totalDays++;
+    allBookings.forEach(b => {
+      if (b.date && b.date.startsWith(monthPrefix) && b.name && b.name.trim()) {
+        const clean = b.name.trim();
+        if (!driverStats[clean]) {
+          driverStats[clean] = { slots: 0, minutes: 0 };
+        }
+        driverStats[clean].slots++;
+        totalSlots++;
+
+        if (b.startTime && b.endTime) {
+          const [sh, sm] = b.startTime.split(":").map(Number);
+          const [eh, em] = b.endTime.split(":").map(Number);
+          const mins = (eh * 60 + em) - (sh * 60 + sm);
+          if (mins > 0) driverStats[clean].minutes += mins;
+        }
       }
     });
 
     $statsRows.innerHTML = "";
 
-    const drivers = Object.keys(counts).sort((a, b) => counts[b] - counts[a]);
+    const drivers = Object.keys(driverStats).sort((a, b) => driverStats[b].slots - driverStats[a].slots);
 
     if (drivers.length === 0) {
       $statsRows.innerHTML = `
         <div class="stats-empty">
-          No bookings for ${MONTHS[month]} ${year}. Click any date to book!
+          No bookings for ${MONTHS[month]} ${year}. Click any date to reserve a time slot!
         </div>
       `;
       return;
     }
 
     const topDriver = drivers[0];
-    const topCount = counts[topDriver];
+    const topCount = driverStats[topDriver].slots;
 
     const monthHeader = document.createElement("div");
     monthHeader.className = "stats-month-header";
     monthHeader.innerHTML = `
-      <span class="stats-month-label">${MONTHS[month]} ${year} (${totalDays} booked)</span>
-      <span class="stats-winner-badge">🏆 ${topDriver} leads (${topCount}d)</span>
+      <span class="stats-month-label">${MONTHS[month]} ${year} (${totalSlots} reservations)</span>
+      <span class="stats-winner-badge">🏆 ${topDriver} leads (${topCount} slots)</span>
     `;
     $statsRows.appendChild(monthHeader);
 
@@ -510,9 +697,10 @@
     barsContainer.className = "stats-bars";
 
     drivers.forEach(driver => {
-      const count = counts[driver];
-      const pct = Math.round((count / totalDays) * 100);
+      const stats = driverStats[driver];
+      const pct = Math.round((stats.slots / totalSlots) * 100);
       const palette = getDriverPalette(driver);
+      const hours = Math.round(stats.minutes / 60);
 
       const row = document.createElement("div");
       row.className = "stats-bar-row";
@@ -521,7 +709,7 @@
         <div class="stats-bar-track">
           <div class="stats-bar-fill" style="width: ${pct}%; background: ${palette.accent}"></div>
         </div>
-        <span class="stats-bar-count">${count}d (${pct}%)</span>
+        <span class="stats-bar-count">${stats.slots} (${hours}h)</span>
       `;
       barsContainer.appendChild(row);
     });
@@ -538,27 +726,19 @@
       return;
     }
 
-    if (!confirm(`Clear all bookings on the calendar for "${driver}"?`)) return;
+    if (!confirm(`Cancel all of your reservations (${driver}) across the board?`)) return;
 
-    // Optimistic removal
-    Object.keys(bookings).forEach(key => {
-      if (bookings[key] && bookings[key].trim().toLowerCase() === driver.toLowerCase()) {
-        delete bookings[key];
-      }
-    });
-
-    renderCalendar();
-    renderLegend();
-    renderStats();
-    renderQuickDrivers();
+    $syncStatus.innerHTML = '<span class="sync-dot pulsing"></span> Clearing...';
 
     try {
-      await fetch("/api/bookings", {
+      const res = await fetch("/api/bookings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "clearUser", name: driver })
       });
-      showToast(`🗑️ Cleared all bookings for ${driver}`);
+      const data = await res.json();
+      showToast(`🗑️ ${data.message || 'Cleared'}`);
+      await fetchBookings(true);
     } catch (err) {
       console.error(err);
       showToast("⚠️ Server sync error");
@@ -568,19 +748,16 @@
   $btnClearAll.addEventListener("click", async () => {
     if (!confirm("Are you sure you want to clear the ENTIRE calendar board for everyone?")) return;
 
-    bookings = {};
-    renderCalendar();
-    renderLegend();
-    renderStats();
-    renderQuickDrivers();
+    $syncStatus.innerHTML = '<span class="sync-dot pulsing"></span> Clearing...';
 
     try {
-      await fetch("/api/bookings", {
+      const res = await fetch("/api/bookings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "clearAll" })
       });
-      showToast("🗑️ Board cleared");
+      showToast("🗑️ All reservations cleared");
+      await fetchBookings(true);
     } catch (err) {
       console.error(err);
       showToast("⚠️ Server sync error");
@@ -630,6 +807,25 @@
     $btnStatsToggle.setAttribute("aria-expanded", !isCollapsed);
   });
 
+  // Modal events
+  $modalCloseBtn.addEventListener("click", closeDayModal);
+  $dayModal.addEventListener("click", (e) => {
+    if (e.target === $dayModal) closeDayModal();
+  });
+
+  $startTimeInput.addEventListener("input", checkLiveConflict);
+  $endTimeInput.addEventListener("input", checkLiveConflict);
+
+  $presetBtns.forEach(btn => {
+    btn.addEventListener("click", () => {
+      $startTimeInput.value = btn.dataset.start;
+      $endTimeInput.value = btn.dataset.end;
+      checkLiveConflict();
+    });
+  });
+
+  $btnConfirmSlot.addEventListener("click", handleConfirmSlot);
+
   // Keyboard navigation
   document.addEventListener("keydown", (e) => {
     if (e.target.tagName === "INPUT") return;
@@ -642,7 +838,6 @@
   // ── Auto Sync Polling ────────────────────
   function startPolling() {
     clearInterval(syncTimer);
-    // Poll every 15 seconds to keep all devices up-to-date
     syncTimer = setInterval(() => {
       fetchBookings(true);
     }, 15000);
