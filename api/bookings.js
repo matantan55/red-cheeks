@@ -74,13 +74,7 @@ module.exports = async (req, res) => {
         return res.status(200).json({ message: `All bookings for ${cleanName} cleared` });
       }
 
-      // 3. Clear all bookings across the board
-      if (body.action === 'clearAll') {
-        await collection.deleteMany({ date: { $exists: true } });
-        return res.status(200).json({ message: 'All bookings cleared' });
-      }
-
-      // 4. Create a new time-slot booking
+      // 3. Create a new time-slot booking
       const { date, startTime, endTime, name, token } = body;
 
       if (!date || !name || !name.trim()) {

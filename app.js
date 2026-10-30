@@ -70,12 +70,7 @@
   const $grid            = document.getElementById("calendar-grid");
 
   const $legend          = document.getElementById("legend");
-  const $statsRows       = document.getElementById("stats-rows");
-  const $statsBody       = document.getElementById("stats-body");
-  const $btnStatsToggle  = document.getElementById("btn-stats-toggle");
-
   const $btnClearMy      = document.getElementById("btn-clear-my");
-  const $btnClearAll     = document.getElementById("btn-clear-all");
   const $toast           = document.getElementById("toast");
 
   // Modal DOM
@@ -248,7 +243,6 @@
 
       renderCalendar();
       renderLegend();
-      renderStats();
       renderQuickDrivers();
 
       if (activeModalDate) {
@@ -642,81 +636,6 @@
     $legend.appendChild(freeItem);
   }
 
-  // ── Render Monthly Stats ─────────────────
-  function renderStats() {
-    const year  = viewDate.getFullYear();
-    const month = viewDate.getMonth();
-    const monthPrefix = `${year}-${String(month + 1).padStart(2, "0")}`;
-
-    const driverStats = {};
-    let totalSlots = 0;
-
-    allBookings.forEach(b => {
-      if (b.date && b.date.startsWith(monthPrefix) && b.name && b.name.trim()) {
-        const clean = b.name.trim();
-        if (!driverStats[clean]) {
-          driverStats[clean] = { slots: 0, minutes: 0 };
-        }
-        driverStats[clean].slots++;
-        totalSlots++;
-
-        if (b.startTime && b.endTime) {
-          const [sh, sm] = b.startTime.split(":").map(Number);
-          const [eh, em] = b.endTime.split(":").map(Number);
-          const mins = (eh * 60 + em) - (sh * 60 + sm);
-          if (mins > 0) driverStats[clean].minutes += mins;
-        }
-      }
-    });
-
-    $statsRows.innerHTML = "";
-
-    const drivers = Object.keys(driverStats).sort((a, b) => driverStats[b].slots - driverStats[a].slots);
-
-    if (drivers.length === 0) {
-      $statsRows.innerHTML = `
-        <div class="stats-empty">
-          No bookings for ${MONTHS[month]} ${year}. Click any date to reserve a time slot!
-        </div>
-      `;
-      return;
-    }
-
-    const topDriver = drivers[0];
-    const topCount = driverStats[topDriver].slots;
-
-    const monthHeader = document.createElement("div");
-    monthHeader.className = "stats-month-header";
-    monthHeader.innerHTML = `
-      <span class="stats-month-label">${MONTHS[month]} ${year} (${totalSlots} reservations)</span>
-      <span class="stats-winner-badge">🏆 ${topDriver} leads (${topCount} slots)</span>
-    `;
-    $statsRows.appendChild(monthHeader);
-
-    const barsContainer = document.createElement("div");
-    barsContainer.className = "stats-bars";
-
-    drivers.forEach(driver => {
-      const stats = driverStats[driver];
-      const pct = Math.round((stats.slots / totalSlots) * 100);
-      const palette = getDriverPalette(driver);
-      const hours = Math.round(stats.minutes / 60);
-
-      const row = document.createElement("div");
-      row.className = "stats-bar-row";
-      row.innerHTML = `
-        <span class="stats-bar-name" title="${driver}">${driver}</span>
-        <div class="stats-bar-track">
-          <div class="stats-bar-fill" style="width: ${pct}%; background: ${palette.accent}"></div>
-        </div>
-        <span class="stats-bar-count">${stats.slots} (${hours}h)</span>
-      `;
-      barsContainer.appendChild(row);
-    });
-
-    $statsRows.appendChild(barsContainer);
-  }
-
   // ── Board Actions ────────────────────────
   $btnClearMy.addEventListener("click", async () => {
     const driver = currentName.trim();
@@ -745,25 +664,6 @@
     }
   });
 
-  $btnClearAll.addEventListener("click", async () => {
-    if (!confirm("Are you sure you want to clear the ENTIRE calendar board for everyone?")) return;
-
-    $syncStatus.innerHTML = '<span class="sync-dot pulsing"></span> Clearing...';
-
-    try {
-      const res = await fetch("/api/bookings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "clearAll" })
-      });
-      showToast("🗑️ All reservations cleared");
-      await fetchBookings(true);
-    } catch (err) {
-      console.error(err);
-      showToast("⚠️ Server sync error");
-    }
-  });
-
   // ── Event Listeners ──────────────────────
   $nameInput.addEventListener("input", (e) => {
     currentName = e.target.value;
@@ -779,32 +679,23 @@
     viewDate.setMonth(viewDate.getMonth() - 1);
     renderCalendar();
     renderLegend();
-    renderStats();
   });
 
   $btnNext.addEventListener("click", () => {
     viewDate.setMonth(viewDate.getMonth() + 1);
     renderCalendar();
     renderLegend();
-    renderStats();
   });
 
   $btnToday.addEventListener("click", () => {
     viewDate = new Date();
     renderCalendar();
     renderLegend();
-    renderStats();
   });
 
   $btnRefresh.addEventListener("click", () => {
     fetchBookings(false);
     showToast("🔄 Board refreshed!");
-  });
-
-  $btnStatsToggle.addEventListener("click", () => {
-    const isCollapsed = $statsBody.classList.toggle("collapsed");
-    $btnStatsToggle.textContent = isCollapsed ? "Show" : "Hide";
-    $btnStatsToggle.setAttribute("aria-expanded", !isCollapsed);
   });
 
   // Modal events
